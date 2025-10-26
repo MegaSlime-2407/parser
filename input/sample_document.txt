@@ -1,0 +1,26 @@
+Sample Document
+
+This is a test document for the document parser.
+
+Abstract:
+This document demonstrates the capabilities of the document parser system.
+It shows how various text elements can be processed and structured.
+
+Keywords: document processing, OCR, text extraction, layout analysis
+
+Introduction:
+Document processing has become increasingly important in the digital age.
+This system combines multiple technologies to provide comprehensive document analysis.
+
+Methods:
+1. Layout detection using LayoutParser
+2. Text extraction using Tesseract OCR
+3. Advanced PDF processing using Marker
+4. Structured data extraction
+
+Results:
+The system successfully processes various document formats and extracts structured information.
+
+References:
+1. Smith, J. (2023). "Advanced Document Processing". Tech Journal.
+2. Johnson, A. (2022). "OCR and Layout Analysis". AI Review.

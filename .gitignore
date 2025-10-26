@@ -1,0 +1,86 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Output files
+output/
+*.json
+*.png
+*.jpg
+*.jpeg
+*.pdf
+!sample_document.png
+!file-sample_150kB.pdf
+
+# Temporary files
+*.log
+*.tmp
+*.temp
+temp/
+tmp/
+
+# System files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Assignment files
+assignment_batch/
+assignment_extracted.json
+assignment_output_batch/
+assignment_output.json
+assignment_output.md
+extracted_data.json
+quick_start_extracted.json
+quick_start_output.json
+batch_processor.py
