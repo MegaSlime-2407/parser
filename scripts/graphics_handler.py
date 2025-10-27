@@ -42,12 +42,10 @@ class GraphicsHandler:
     def detect_visual_elements(self, image_path: str) -> Dict[str, Any]:
         
         try:
-
             image = cv2.imread(image_path)
             image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
             
-
             elements = {
                 'charts': self._detect_charts(image_rgb),
                 'tables': self._detect_tables(image_rgb),
@@ -77,15 +75,12 @@ class GraphicsHandler:
         charts = []
         
         try:
-
             gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
             
-
             edges = cv2.Canny(gray, 50, 150)
             lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=50, minLineLength=30, maxLineGap=10)
             
             if lines is not None:
-
                 line_groups = self._group_lines(lines)
                 
                 for i, group in enumerate(line_groups):
@@ -94,7 +89,7 @@ class GraphicsHandler:
                         charts.append({
                             'id': i,
                             'type': 'line_chart',
-                            'bounding_box': bbox,
+                            'bounding_box': [int(x) for x in bbox],
                             'line_count': len(group),
                             'confidence': min(len(group) / 10, 1.0)
                         })
@@ -112,9 +107,9 @@ class GraphicsHandler:
                         charts.append({
                             'id': len(charts),
                             'type': 'bar_chart',
-                            'bounding_box': [x, y, x+w, y+h],
-                            'area': area,
-                            'aspect_ratio': aspect_ratio,
+                            'bounding_box': [int(x), int(y), int(x+w), int(y+h)],
+                            'area': float(area),
+                            'aspect_ratio': float(aspect_ratio),
                             'confidence': min(area / 1000, 1.0)
                         })
             
@@ -174,9 +169,9 @@ class GraphicsHandler:
                         conf = min(cell_count / 10.0, 1.0)
                         tables.append({
                             'id': i,
-                            'bounding_box': [x, y, x+w, y+h],
-                            'area': area,
-                            'cell_count': cell_count,
+                            'bounding_box': [int(x), int(y), int(x+w), int(y+h)],
+                            'area': float(area),
+                            'cell_count': int(cell_count),
                             'confidence': conf
                         })
         
@@ -202,9 +197,9 @@ class GraphicsHandler:
                         text_blocks.append({
                             'id': i,
                             'text': text,
-                            'bounding_box': [x, y, x+w, y+h],
+                            'bounding_box': [int(x), int(y), int(x+w), int(y+h)],
                             'confidence': int(data['conf'][i]) / 100.0,
-                            'font_size': h
+                            'font_size': int(h)
                         })
         
         except Exception as e:
@@ -217,36 +212,71 @@ class GraphicsHandler:
         images = []
         
         try:
-
             hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
             lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
+            gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
             
-
             color_variance = np.var(image, axis=2)
-            high_variance_regions = color_variance > np.percentile(color_variance, 80)
             
+            high_variance_threshold = np.percentile(color_variance, 90)
+            high_variance_regions = color_variance > high_variance_threshold
+            
+            try:
+                ocr_data = pytesseract.image_to_data(gray, output_type=Output.DICT)
+                text_regions = []
+                
+                for i in range(len(ocr_data['text'])):
+                    if int(ocr_data['conf'][i]) > 30:
+                        x = ocr_data['left'][i]
+                        y = ocr_data['top'][i]
+                        w = ocr_data['width'][i]
+                        h = ocr_data['height'][i]
+                        text_regions.append((x, y, x+w, y+h))
+                
 
+                text_mask = np.zeros(gray.shape, dtype=np.uint8)
+                for region in text_regions:
+                    cv2.rectangle(text_mask, (region[0], region[1]), (region[2], region[3]), 255, -1)
+                
+                
+                kernel = np.ones((20, 20), np.uint8)
+                text_mask = cv2.dilate(text_mask, kernel, iterations=1)
+                
+            except Exception:
+                text_mask = np.zeros(gray.shape, dtype=np.uint8)
+            
+            edges = cv2.Canny(gray, 50, 150)
+            edge_density = cv2.filter2D((edges > 0).astype(np.float32), -1, np.ones((30, 30)) / 900)
+            high_edge_regions = edge_density > 0.1
+            
+            combined_mask = high_variance_regions & (text_mask == 0) & high_edge_regions
+            
             contours, _ = cv2.findContours(
-                high_variance_regions.astype(np.uint8), 
+                combined_mask.astype(np.uint8), 
                 cv2.RETR_EXTERNAL, 
                 cv2.CHAIN_APPROX_SIMPLE
             )
             
             for i, contour in enumerate(contours):
                 area = cv2.contourArea(contour)
-                if area > 500:
+                if area > 1000:
                     x, y, w, h = cv2.boundingRect(contour)
                     aspect_ratio = w / h
                     
-
-                    if 0.3 < aspect_ratio < 3.0 and w > 50 and h > 50:
-                        images.append({
-                            'id': i,
-                            'bounding_box': [x, y, x+w, y+h],
-                            'area': area,
-                            'aspect_ratio': aspect_ratio,
-                            'confidence': min(area / 5000, 1.0)
-                        })
+                    if 0.2 < aspect_ratio < 5.0 and w > 100 and h > 100:
+                        roi = image[y:y+h, x:x+w]
+                        roi_variance = np.var(roi, axis=2)
+                        avg_variance = np.mean(roi_variance)
+                        
+                        if avg_variance > high_variance_threshold * 0.8:
+                            images.append({
+                                'id': i,
+                                'bounding_box': [int(x), int(y), int(x+w), int(y+h)],
+                                'area': float(area),
+                                'aspect_ratio': float(aspect_ratio),
+                                'confidence': min(area / 10000, 1.0),
+                                'color_variance': float(avg_variance)
+                            })
         
         except Exception as e:
             logger.error(f"Error detecting images: {e}")
@@ -280,8 +310,8 @@ class GraphicsHandler:
                         shapes.append({
                             'id': i,
                             'type': shape_type,
-                            'bounding_box': [x, y, x+w, y+h],
-                            'area': area,
+                            'bounding_box': [int(x), int(y), int(x+w), int(y+h)],
+                            'area': float(area),
                             'vertices': vertices,
                             'confidence': min(area / 1000, 1.0)
                         })

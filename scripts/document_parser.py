@@ -26,6 +26,16 @@ try:
 except ImportError:
     MARKER_AVAILABLE = False
 
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super(NumpyEncoder, self).default(obj)
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -37,14 +47,11 @@ class DocumentParser:
         self.tesseract_path = tesseract_path
         self.marker_models_path = marker_models_path
         
-
         if tesseract_path:
             pytesseract.pytesseract.tesseract_cmd = tesseract_path
         
-
         self.layout_model = None
         try:
-
             has_detectron = hasattr(lp, 'is_detectron2_available') and lp.is_detectron2_available()
             has_paddle = hasattr(lp, 'is_paddle_available') and lp.is_paddle_available()
             
@@ -68,10 +75,8 @@ class DocumentParser:
                     self.layout_model = None
 
         except Exception:
-
             self.layout_model = None
         
-
         self.marker_models = None
         if MARKER_AVAILABLE and marker_models_path:
             try:
@@ -80,7 +85,6 @@ class DocumentParser:
             except Exception as e:
                 logger.warning(f"Failed to load Marker models: {e}")
         
-
         self.graphics_handler = GraphicsHandler(tesseract_path=tesseract_path)
     
     def extract_text_from_image(self, image_path: str) -> str:
@@ -116,42 +120,99 @@ class DocumentParser:
             image = cv2.imread(image_path)
             image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             
-
+            visual_elements = self.graphics_handler.detect_visual_elements(image_path)
+            
             if self.layout_model is None:
                 logger.warning("LayoutParser model not available, using basic OCR")
 
                 text = pytesseract.image_to_string(image_rgb, lang='eng')
+                
+                regions = []
+                if 'visual_elements' in visual_elements:
+                    elements = visual_elements['visual_elements']
+                    
+                    for img in elements.get('images', []):
+                        regions.append({
+                            'id': f"img_{img['id']}",
+                            'type': 'image',
+                            'coordinates': [int(x) for x in img['bounding_box']],
+                            'text': '',
+                            'confidence': float(img.get('confidence', 0.0)),
+                            'metadata': {
+                                'area': float(img.get('area', 0)),
+                                'aspect_ratio': float(img.get('aspect_ratio', 0)),
+                                'color_variance': float(img.get('color_variance', 0))
+                            }
+                        })
+                    
+                    for chart in elements.get('charts', []):
+                        regions.append({
+                            'id': f"chart_{chart['id']}",
+                            'type': 'chart',
+                            'coordinates': [int(x) for x in chart['bounding_box']],
+                            'text': '',
+                            'confidence': float(chart.get('confidence', 0.0)),
+                            'metadata': {
+                                'chart_type': chart.get('type', 'unknown'),
+                                'line_count': int(chart.get('line_count', 0))
+                            }
+                        })
+                    
+                    for table in elements.get('tables', []):
+                        regions.append({
+                            'id': f"table_{table['id']}",
+                            'type': 'table',
+                            'coordinates': [int(x) for x in table['bounding_box']],
+                            'text': '',
+                            'confidence': float(table.get('confidence', 0.0)),
+                            'metadata': {
+                                'table_type': table.get('type', 'unknown'),
+                                'cell_count': int(table.get('cell_count', 0))
+                            }
+                        })
+                    
+                    for shape in elements.get('shapes', []):
+                        regions.append({
+                            'id': f"shape_{shape['id']}",
+                            'type': 'shape',
+                            'coordinates': [int(x) for x in shape['bounding_box']],
+                            'text': '',
+                            'confidence': float(shape.get('confidence', 0.0)),
+                            'metadata': {
+                                'shape_type': shape.get('type', 'unknown'),
+                                'area': float(shape.get('area', 0))
+                            }
+                        })
+                
                 return {
                     'full_text': text.strip(),
-                    'regions': [],
+                    'regions': regions,
                     'metadata': {
                         'image_path': image_path,
-                        'total_regions': 0,
-                        'extraction_method': 'tesseract_only'
+                        'total_regions': len(regions),
+                        'extraction_method': 'tesseract_graphics',
+                        'visual_elements': visual_elements.get('visual_elements', {})
                     }
                 }
             
             layout = self.layout_model.detect(image_rgb)
             
-
             extracted_data = {
                 'full_text': '',
                 'regions': [],
                 'metadata': {
                     'image_path': image_path,
                     'total_regions': len(layout),
-                    'extraction_method': 'layoutparser_tesseract'
+                    'extraction_method': 'layoutparser_tesseract_graphics',
+                    'visual_elements': visual_elements.get('visual_elements', {})
                 }
             }
             
             for i, block in enumerate(layout):
-
                 x1, y1, x2, y2 = block.coordinates
                 
-
                 cropped_image = image_rgb[y1:y2, x1:x2]
                 
-
                 region_text = pytesseract.image_to_string(cropped_image, lang='eng')
                 
                 region_data = {
@@ -165,6 +226,64 @@ class DocumentParser:
                 extracted_data['regions'].append(region_data)
                 extracted_data['full_text'] += region_text + '\n'
             
+            if 'visual_elements' in visual_elements:
+                elements = visual_elements['visual_elements']
+                
+                for img in elements.get('images', []):
+                    extracted_data['regions'].append({
+                        'id': f"img_{img['id']}",
+                        'type': 'image',
+                        'coordinates': [int(x) for x in img['bounding_box']],
+                        'text': '',
+                        'confidence': float(img.get('confidence', 0.0)),
+                        'metadata': {
+                            'area': float(img.get('area', 0)),
+                            'aspect_ratio': float(img.get('aspect_ratio', 0)),
+                            'color_variance': float(img.get('color_variance', 0))
+                        }
+                    })
+                
+                for chart in elements.get('charts', []):
+                    extracted_data['regions'].append({
+                        'id': f"chart_{chart['id']}",
+                        'type': 'chart',
+                        'coordinates': [int(x) for x in chart['bounding_box']],
+                        'text': '',
+                        'confidence': float(chart.get('confidence', 0.0)),
+                        'metadata': {
+                            'chart_type': chart.get('type', 'unknown'),
+                            'line_count': int(chart.get('line_count', 0))
+                        }
+                    })
+                
+                for table in elements.get('tables', []):
+                    extracted_data['regions'].append({
+                        'id': f"table_{table['id']}",
+                        'type': 'table',
+                        'coordinates': [int(x) for x in table['bounding_box']],
+                        'text': '',
+                        'confidence': float(table.get('confidence', 0.0)),
+                        'metadata': {
+                            'table_type': table.get('type', 'unknown'),
+                            'cell_count': int(table.get('cell_count', 0))
+                        }
+                    })
+                
+                for shape in elements.get('shapes', []):
+                    extracted_data['regions'].append({
+                        'id': f"shape_{shape['id']}",
+                        'type': 'shape',
+                        'coordinates': [int(x) for x in shape['bounding_box']],
+                        'text': '',
+                        'confidence': float(shape.get('confidence', 0.0)),
+                        'metadata': {
+                            'shape_type': shape.get('type', 'unknown'),
+                            'area': float(shape.get('area', 0))
+                        }
+                    })
+            
+            extracted_data['metadata']['total_regions'] = len(extracted_data['regions'])
+            
             return extracted_data
             
         except Exception as e:
@@ -174,11 +293,9 @@ class DocumentParser:
     def process_pdf_with_marker(self, pdf_path: str) -> Dict[str, Any]:
         
         if not MARKER_AVAILABLE or not self.marker_models:
-
             return self.process_pdf_fallback(pdf_path)
         
         try:
-
             result = convert_single_pdf(pdf_path, self.marker_models)
             
             return {
@@ -197,7 +314,6 @@ class DocumentParser:
     def process_pdf_fallback(self, pdf_path: str) -> Dict[str, Any]:
         
         try:
-
             images = convert_from_path(pdf_path, dpi=300)
             
             extracted_data = {
@@ -211,18 +327,15 @@ class DocumentParser:
             }
             
             for page_num, image in enumerate(images):
-
                 temp_image_path = f"/tmp/temp_page_{page_num}.png"
                 image.save(temp_image_path)
                 
-
                 page_data = self.extract_text_with_layout(temp_image_path)
                 page_data['page_number'] = page_num + 1
                 
                 extracted_data['pages'].append(page_data)
                 extracted_data['full_text'] += page_data['full_text'] + '\n'
                 
-
                 os.remove(temp_image_path)
             
             return extracted_data
@@ -238,7 +351,6 @@ class DocumentParser:
         if not file_path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
         
-
         file_extension = file_path.suffix.lower()
         
         if file_extension == '.pdf':
@@ -251,7 +363,6 @@ class DocumentParser:
         else:
             raise ValueError(f"Unsupported file format: {file_extension}")
         
-
         if output_format.lower() == 'markdown':
             return self._format_as_markdown(result)
         else:
@@ -261,19 +372,15 @@ class DocumentParser:
         
         markdown_content = []
         
-
         markdown_content.append("# Document Content\n")
         
-
         if 'metadata' in data:
             markdown_content.append("## Metadata\n")
             for key, value in data['metadata'].items():
                 markdown_content.append(f"- **{key}**: {value}\n")
             markdown_content.append("\n")
         
-
         if 'pages' in data:
-
             for page in data['pages']:
                 markdown_content.append(f"## Page {page.get('page_number', 'Unknown')}\n")
                 
@@ -285,7 +392,6 @@ class DocumentParser:
                 else:
                     markdown_content.append(page.get('full_text', '') + "\n")
         else:
-
             if 'regions' in data:
                 for region in data['regions']:
                     if region['text'].strip():
@@ -303,11 +409,9 @@ class DocumentParser:
             file_extension = file_path.suffix.lower()
             
             if file_extension in ['.png', '.jpg', '.jpeg', '.tiff', '.bmp']:
-
                 return self.graphics_handler.generate_visual_summary(str(file_path))
             
             elif file_extension == '.pdf':
-
                 try:
                     images = convert_from_path(str(file_path), dpi=300)
                     visual_analysis = {
@@ -325,18 +429,15 @@ class DocumentParser:
                     }
                     
                     for page_num, image in enumerate(images):
-
                         temp_image_path = f"/tmp/temp_page_{page_num}.png"
                         image.save(temp_image_path)
                         
-
                         page_analysis = self.graphics_handler.generate_visual_summary(temp_image_path)
                         visual_analysis['pages'].append({
                             'page_number': page_num + 1,
                             'analysis': page_analysis
                         })
                         
-
                         if 'visual_elements' in page_analysis:
                             stats = page_analysis['visual_elements']
                             visual_analysis['overall_analysis']['visual_elements']['total_charts'] += len(stats.get('charts', []))
@@ -344,7 +445,6 @@ class DocumentParser:
                             visual_analysis['overall_analysis']['visual_elements']['total_images'] += len(stats.get('images', []))
                             visual_analysis['overall_analysis']['visual_elements']['total_shapes'] += len(stats.get('shapes', []))
                         
-
                         os.remove(temp_image_path)
                     
                     return visual_analysis
@@ -377,27 +477,24 @@ def main():
         logging.getLogger().setLevel(logging.DEBUG)
     
     try:
-
         doc_parser = DocumentParser(
             tesseract_path=args.tesseract_path,
             marker_models_path=args.marker_models
         )
         
-
         logger.info(f"Processing document: {args.input_file}")
         result = doc_parser.process_document(args.input_file, args.format)
         
-
         if args.output:
             with open(args.output, 'w', encoding='utf-8') as f:
                 if args.format == 'json':
-                    json.dump(result, f, indent=2, ensure_ascii=False)
+                    json.dump(result, f, indent=2, ensure_ascii=False, cls=NumpyEncoder)
                 else:
                     f.write(result)
             logger.info(f"Output saved to: {args.output}")
         else:
             if args.format == 'json':
-                print(json.dumps(result, indent=2, ensure_ascii=False))
+                print(json.dumps(result, indent=2, ensure_ascii=False, cls=NumpyEncoder))
             else:
                 print(result)
                 
